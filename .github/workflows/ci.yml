@@ -67,7 +67,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Scan K8s manifests with Trivy
-        uses: aquasecurity/trivy-action@0.29.0
+        uses: aquasecurity/trivy-action@v0.35.0
         with:
           scan-type: config
           scan-ref: rollout/
@@ -76,7 +76,7 @@ jobs:
           severity: HIGH,CRITICAL
 
       - name: Scan Dockerfile with Trivy
-        uses: aquasecurity/trivy-action@0.29.0
+        uses: aquasecurity/trivy-action@v0.35.0
         with:
           scan-type: config
           scan-ref: app/Dockerfile
