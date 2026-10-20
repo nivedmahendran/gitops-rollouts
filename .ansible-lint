@@ -1,0 +1,7 @@
+---
+profile: production
+skip_list:
+  # The playbook needs `shell` for piped kubectl apply and setup pipelines,
+  # which have no module equivalent. This is an explicit, reviewed exception.
+  - command-instead-of-shell
+  - risky-shell-pipe

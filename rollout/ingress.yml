@@ -1,0 +1,22 @@
+# The Ingress points at the WEIGHTED TraefikService, not at a plain Service.
+# That indirection is what allows traffic to be split without editing the
+# Ingress on every promotion step.
+
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: demo-app
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: web
+spec:
+  rules:
+    - host: demo.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: demo-app-weighted
+                port:
+                  number: 80

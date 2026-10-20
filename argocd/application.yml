@@ -1,0 +1,34 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: gitops-rollouts
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/nivedmahendran/gitops-rollouts
+    targetRevision: main
+    path: rollout
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: demo
+  syncPolicy:
+    automated:
+      # prune is ON here, unlike the UAT app. In this repo every object in
+      # rollout/ is owned by ArgoCD, so removing a manifest should remove the
+      # resource. Leaving it off is how orphaned objects accumulate.
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      # The Rollout controller owns the fields it mutates during a promotion
+      # (image, TraefikService weights). Without this, selfHeal fights the
+      # controller and a canary in progress gets reverted mid-flight.
+      - RespectIgnoreDifferences=true
+  ignoreDifferences:
+    - group: traefik.io
+      kind: TraefikService
+      jsonPointers:
+        - /spec/weighted/services

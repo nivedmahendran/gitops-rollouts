@@ -1,0 +1,134 @@
+# Argo Rollouts canary deployment.
+#
+# Why a Rollout and not a Deployment:
+# A Deployment's rolling update gives no control over how much traffic reaches
+# new code, and no automated way to stop a bad release. A Rollout lets us send
+# a small slice of live traffic to the new version, pause to let metrics decide,
+# and roll back automatically if they look wrong.
+#
+# The strategy below is a "canary with analysis":
+#   20% traffic -> pause (manual or automatic gate) -> 50% -> pause -> 100%
+# At each pause, an AnalysisRun queries Prometheus. If the error rate crosses
+# the threshold, the rollout aborts and reverts to the stable ReplicaSet — no
+# human needed at 3am.
+#
+# Step weight vs canary replica count: we use setWeight (percentage of traffic)
+# rather than setCanaryScale, because with a small replica count a percentage
+# change in replicas is too coarse to be a meaningful signal.
+
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: demo-app
+  labels:
+    app: demo-app
+spec:
+  replicas: 4
+
+  # A Deployment keeps up to 25% extra pods during an update; we want tighter
+  # control, so we allow no surge and no unavailability beyond the canary.
+  strategy:
+    canary:
+      # These Services are created by the rollout controller. `stable` always
+      # points at the last known-good ReplicaSet; `canary` points at the new one.
+      # The ingress sends all traffic to `stable`; the controller shifts weight.
+      stableService: demo-app-stable
+      canaryService: demo-app-canary
+
+      trafficRouting:
+        # Traefik is already the K3s default ingress in the other projects, so
+        # reusing it avoids adding a second mesh. Rollouts supports nginx,
+        # istio, smi, and alb here — Traefik uses the SMI-style weight split.
+        traefik:
+          weightedTraefikServiceName: demo-app-weighted
+
+      steps:
+        # 1. Send 20% of traffic to the new version.
+        - setWeight: 20
+
+        # 2. Hold for 2 minutes of real traffic before deciding. Wall-clock
+        #    matters here: an instant check would only see cold-start behaviour.
+        - pause:
+            duration: 2m
+
+        # 3. Ask Prometheus whether the canary is healthy. Failure aborts.
+        - analysis:
+            templates:
+              - templateName: success-rate
+            args:
+              - name: service-name
+                value: demo-app-canary
+
+        # 4. Widen to 50% and confirm the result holds at higher load.
+        - setWeight: 50
+        - pause:
+            duration: 5m
+        - analysis:
+            templates:
+              - templateName: success-rate
+            args:
+              - name: service-name
+                value: demo-app-canary
+
+        # 5. Full promotion. At 100% the canary ReplicaSet becomes the stable one.
+        - setWeight: 100
+
+      # If a release breaks, undo automatically rather than paging someone.
+      # scaleDownDelay keeps the old ReplicaSet alive briefly so in-flight
+      # requests are not cut off mid-response.
+      scaleDownDelaySeconds: 30
+      abortScaleDownDelaySeconds: 30
+
+      canaryMetadata:
+        labels:
+          role: canary
+      stableMetadata:
+        labels:
+          role: stable
+
+  selector:
+    matchLabels:
+      app: demo-app
+
+  template:
+    metadata:
+      labels:
+        app: demo-app
+    spec:
+      containers:
+        - name: demo-app
+          image: ghcr.io/nivedmahendran/gitops-rollouts-demo:1.0.0
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: VERSION
+              value: "1.0.0"
+          # Readiness gates weight-shifting: traffic only moves to a pod that
+          # reports it is actually able to serve.
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]

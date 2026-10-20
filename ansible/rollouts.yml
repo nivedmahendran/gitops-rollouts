@@ -1,0 +1,53 @@
+---
+# Install Argo Rollouts and the rollout kubectl plugin on a K3s node.
+#
+# Argo Rollouts is a controller, not a CRD alone: without the controller running
+# a Rollout object is accepted by the API server but nothing ever reconciles it,
+# so the app silently never gets created. Installing the controller is the step
+# people forget when they copy a Rollout manifest.
+
+- name: Install Argo Rollouts on K3s
+  hosts: k3s
+  become: true
+
+  tasks:
+    - name: Create argo-rollouts namespace
+      ansible.builtin.shell: |
+        k3s kubectl create namespace argo-rollouts --dry-run=client -o yaml | k3s kubectl apply -f -
+      changed_when: false
+
+    - name: Install Argo Rollouts controller
+      ansible.builtin.shell: |
+        k3s kubectl apply -n argo-rollouts \
+          -f https://github.com/argoproj/argo-rollouts/releases/latest/download/install.yaml
+      changed_when: true
+
+    - name: Wait for the controller to become ready
+      ansible.builtin.shell: |
+        k3s kubectl wait --for=condition=Ready pods --all -n argo-rollouts --timeout=180s
+      changed_when: false
+
+    - name: Install the kubectl-argo-rollouts plugin
+      ansible.builtin.shell: |
+        set -euo pipefail
+        ARCH=$(uname -m)
+        case "$ARCH" in
+          x86_64)  PLATFORM=linux-amd64 ;;
+          aarch64) PLATFORM=linux-arm64 ;;
+          *) echo "unsupported arch: $ARCH" >&2; exit 1 ;;
+        esac
+        curl -sSLo /usr/local/bin/kubectl-argo-rollouts \
+          "https://github.com/argoproj/argo-rollouts/releases/latest/download/kubectl-argo-rollouts-${PLATFORM}"
+        chmod +x /usr/local/bin/kubectl-argo-rollouts
+      args:
+        creates: /usr/local/bin/kubectl-argo-rollouts
+
+    - name: Verify the plugin works
+      ansible.builtin.command: kubectl-argo-rollouts version --short
+      register: rollouts_version
+      changed_when: false
+      failed_when: false
+
+    - name: Report installed version
+      ansible.builtin.debug:
+        msg: "kubectl-argo-rollouts: {{ rollouts_version.stdout | default('version check skipped') }}"

@@ -1,0 +1,35 @@
+# ServiceMonitor — the link between the app and the canary analysis.
+#
+# The AnalysisTemplate queries Prometheus for `http_requests_total{job="demo-app"}`.
+# That series only exists if Prometheus is actually scraping the pods. Without
+# this object the query returns no data, and a no-data analysis result is a
+# FAILED analysis, which aborts every rollout. So this file is not optional
+# decoration — it is what makes the automated gate function.
+#
+# Requires the Prometheus Operator CRDs (kube-prometheus-stack).
+
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: demo-app
+  labels:
+    # Must match the Prometheus instance's serviceMonitorSelector. With
+    # kube-prometheus-stack the default release label is "kube-prometheus-stack";
+    # change this if your Helm release name differs.
+    release: kube-prometheus-stack
+spec:
+  namespaceSelector:
+    matchNames:
+      - demo
+  selector:
+    matchLabels:
+      # Both stable and canary are scraped. The `service` label on the metric
+      # distinguishes them, which is how the analysis isolates canary traffic.
+      app: demo-app
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 15s
+      # The success rate is computed with rate() over 2m, so 15s scrapes give
+      # eight samples per window — enough to smooth out a single outlier.
+      scrapeTimeout: 10s

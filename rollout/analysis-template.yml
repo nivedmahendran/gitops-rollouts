@@ -1,0 +1,43 @@
+# AnalysisTemplate — the automated gate on a canary release.
+#
+# This is the part that turns a canary from "manual staged rollout" into
+# something that protects you. Every invocation queries Prometheus, and if the
+# measurement does not satisfy the condition, the owning Rollout aborts and
+# reverts.
+#
+# The template is parameterised by service name so it can be reused against the
+# canary and, if desired, the stable service as a baseline comparison.
+
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: success-rate
+spec:
+  args:
+    - name: service-name
+  metrics:
+    - name: success-rate
+      # Check every 30s for up to 5 minutes. One failed measurement fails the
+      # run, so a persistent error rate aborts quickly rather than limping on.
+      interval: 30s
+      count: 10
+      failureLimit: 1
+      successCondition: result[0] >= 0.95
+      provider:
+        prometheus:
+          address: http://prometheus-operated.monitoring.svc.cluster.local:9090
+          query: |
+            sum(rate(
+              http_requests_total{
+                job="demo-app",
+                service="{{args.service-name}}",
+                status=~"2.."
+              }[2m]
+            ))
+            /
+            sum(rate(
+              http_requests_total{
+                job="demo-app",
+                service="{{args.service-name}}"
+              }[2m]
+            ))

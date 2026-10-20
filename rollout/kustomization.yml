@@ -1,0 +1,19 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: demo
+
+resources:
+  - namespace.yml
+  - rollout.yml
+  - services.yml
+  - analysis-template.yml
+  - servicemonitor.yml
+  - ingress.yml
+
+# `kubectl apply` is not enough to promote a canary, but changing the image tag
+# is a normal kustomize edit and is what CI does on a release:
+#   cd rollout && kustomize edit set image \
+#     ghcr.io/nivedmahendran/gitops-rollouts-demo=ghcr.io/nivedmahendran/gitops-rollouts-demo:1.1.0
+images:
+  - name: ghcr.io/nivedmahendran/gitops-rollouts-demo
+    newTag: 1.0.0

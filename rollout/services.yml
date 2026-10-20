@@ -1,0 +1,54 @@
+# Services used by the canary.
+#
+# Three objects are involved and the relationship is easy to get wrong:
+#
+#   demo-app-stable    -> selects only stable pods (role: stable)
+#   demo-app-canary    -> selects only canary pods (role: canary)
+#   demo-app-weighted  -> a TraefikService that splits between the two
+#
+# The Rollout controller creates and manages the two Services; the TraefikService
+# is what the Ingress actually points at. The controller edits the weight on the
+# TraefikService as the rollout progresses.
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: demo-app-stable
+spec:
+  selector:
+    app: demo-app
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: demo-app-canary
+spec:
+  selector:
+    app: demo-app
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+
+---
+# Traefik CRD that performs the weighted split. apiVersion is traefik.io/v1alpha1
+# rather than the older traefik.containo.us/v1alpha1 — the old group is removed
+# in Traefik v3, which is what K3s ships.
+apiVersion: traefik.io/v1alpha1
+kind: TraefikService
+metadata:
+  name: demo-app-weighted
+spec:
+  weighted:
+    services:
+      - name: demo-app-stable
+        port: 80
+        weight: 100
+      - name: demo-app-canary
+        port: 80
+        weight: 0
